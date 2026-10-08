@@ -1,0 +1,44 @@
+name: Identity security checks
+
+on:
+  pull_request:
+    branches: [main, feat/identity-state-machine]
+  push:
+    branches: [main, feat/identity-state-machine, security/identity-state-machine-review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: identity-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  identity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      UV_PYTHON: '3.13.15'
+      PYTHONHASHSEED: '0'
+    steps:
+      - name: Check out review code without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install the reviewed uv version
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: '0.12.5'
+          python-version: '3.13.15'
+          enable-cache: false
+          github-token: ''
+      - name: Install locked dependencies
+        run: uv sync --locked
+      - name: Run security and property tests
+        run: uv run pytest -v
+      - name: Lint
+        run: uv run ruff check .
+      - name: Type check
+        run: uv run mypy src
+      - name: Check lock consistency
+        run: uv lock --check

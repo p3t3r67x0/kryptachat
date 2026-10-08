@@ -39,19 +39,38 @@ class PendingChallenge:
     started_at: float
 
 
+@dataclass(frozen=True)
+class FreshnessDeadline:
+    """Local response deadline only; this is not an externally guaranteed revocation lease."""
+
+    started_at: float
+    max_age_seconds: int
+
+    def require_live(self, now: float) -> None:
+        elapsed = now - self.started_at
+        if not math.isfinite(elapsed) or elapsed < 0:
+            raise FreshnessError("local monotonic clock is invalid")
+        if elapsed >= self.max_age_seconds:
+            raise ExpiredFreshness("external confirmation or challenge expired")
+
+
 def verify_freshness(
     pending: PendingChallenge | None,
     evidence: bytes | None,
     verifier: FreshnessVerifier | None,
     policy: FreshnessPolicy,
     monotonic: Callable[[], float],
-) -> None:
+) -> FreshnessDeadline:
     if pending is None or evidence is None or verifier is None:
         raise MissingFreshness("external verifier, challenge and evidence are required")
     if type(evidence) is not bytes or not 0 < len(evidence) <= 65_536:
         raise FreshnessError("invalid external evidence size or type")
     try:
-        confirmation = checked(verifier.verify(evidence, pending.challenge))
+        confirmation = checked(
+            ExternalConfirmation.model_validate(
+                verifier.verify(evidence, pending.challenge), strict=True
+            )
+        )
     except Exception as exc:
         # Untrusted evidence must not escape the adapter as a successful confirmation.
         raise FreshnessError("external evidence verification failed") from exc
@@ -59,8 +78,9 @@ def verify_freshness(
         raise FreshnessError("confirmation is not bound to the requested candidate and nonce")
     if confirmation.valid_for_seconds > policy.confirmation_max_age_seconds:
         raise FreshnessError("external confirmation lifetime exceeds policy")
-    elapsed = monotonic() - pending.started_at
-    if not math.isfinite(elapsed) or elapsed < 0:
-        raise FreshnessError("local monotonic clock is invalid")
-    if elapsed >= min(policy.challenge_max_age_seconds, confirmation.valid_for_seconds):
-        raise ExpiredFreshness("external confirmation or challenge expired")
+    deadline = FreshnessDeadline(
+        pending.started_at,
+        min(policy.challenge_max_age_seconds, confirmation.valid_for_seconds),
+    )
+    deadline.require_live(monotonic())
+    return deadline

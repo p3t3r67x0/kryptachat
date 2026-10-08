@@ -147,10 +147,11 @@ eines bestimmten Menschen. Gestohlene noch aktive Schlüssel bleiben ein Risiko.
 6. Bekannten Vorgänger mit aktuellem Head vergleichen; authentische konkurrierende
    Nachfolger sind ein Fork, keine automatische Zusammenführung.
 7. Signiertes Autorisierungsfenster prüfen; externe Aktualitätsbestätigung prüfen.
-8. Zustand während der externen Prüfung unverändert und Action weiterhin gültig;
-   erneute mutierende Aufrufe aus dem Prüfer sind gesperrt.
-9. Unter `RLock` eine einzige neue Snapshot-Referenz setzen: Historie, Zustand
-   und Entfernung ausstehender Challenges werden zusammen übernommen.
+8. Rekursive Operationsaufrufe aus Prüfer und Uhren sind während der gesamten
+   Operation gesperrt; reine State-/History-Lesezugriffe bleiben möglich.
+9. Neuen Snapshot vorab vollständig anlegen; danach Action-Fenster und lokale
+   Nachweisfrist erneut prüfen und eine einzige Snapshot-Referenz übernehmen.
+   Historie, Zustand und Entfernung ausstehender Challenges ändern sich zusammen.
 
 `validate_transition()` führt ausschließlich lokale Prüfungen aus und gibt
 einen Kandidaten zurück. Es aktiviert kein Gerät. `check_known_state()` kann
@@ -190,7 +191,10 @@ eine monotone Startzeit. Default-Fristen: Challenge maximal 30 Sekunden,
 bestätigte Gültigkeitsdauer maximal 30 Sekunden. Werte sind konfigurierbar
 von 1 bis 300 Sekunden. Ein Prüfer darf eine kürzere Frist verlangen.
 Bei Erreichen der Frist, negativer verstrichener Zeit oder nicht endlicher
-Uhrzeit wird abgelehnt. Alle Übernahmen nach Genesis verlangen diesen Nachweis;
+Uhrzeit wird abgelehnt. Die Nachweisfrist wird nach der Snapshot-Allokation und
+der letzten Wanduhrprüfung unmittelbar vor der Übernahme erneut geprüft.
+Das ist eine Prüfung am lokalen Commit-Punkt, keine Echtzeitgarantie gegen
+Betriebssystem-Preemption und keine globale Widerrufslease. Alle Übernahmen nach Genesis verlangen diesen Nachweis;
 es gibt keinen Schalter für lokale Fail-Open-Übernahme.
 
 Die monotone Uhr begrenzt nur die Dauer einer begonnenen Anfrage. Die Wanduhr
@@ -232,16 +236,19 @@ separate Spezifikation. Ein nackter aktueller Head darf die Lücke nicht ersetze
 ## Nutzung und Prüfungen
 
 ```bash
-uv sync
-uv run pytest
+uv sync --locked
+uv run pytest -v
 uv run ruff check .
 uv run mypy src
+uv lock --check
 ```
 
 Bei einem schreibgeschützten Standardcache kann `UV_CACHE_DIR` auf ein
-beschreibbares Verzeichnis gesetzt werden. `uv.lock` ist für reproduzierbare
-Auflösung vorgesehen, wurde wegen der dokumentierten Downloadblockade noch
-nicht erzeugt. Die alte `requirements.txt` gehört zum ursprünglichen
+beschreibbares Verzeichnis gesetzt werden. `uv.lock` ist jetzt versioniert.
+Hatchling und seine Build-Abhängigkeiten sind zusätzlich gepinnt; uv erlaubt
+für `cryptography` und `pynacl` ausschließlich Wheels. Plattformen ohne passendes
+Wheel scheitern geschlossen. Vorinstallierte/manuell manipulierte Pakete und
+kompromittierte Herstellerartefakte werden dadurch nicht vertrauenswürdig. Die alte `requirements.txt` gehört zum ursprünglichen
 App-Konzept und wird für diesen Prototyp nicht verwendet.
 
 Minimaler Einstieg ohne externen Prüfer:
@@ -271,8 +278,9 @@ Empfänger korrelierbar; Zugriff und Verteilung sind noch nicht spezifiziert.
 
 Maximal 64 Geräte inklusive Tombstones, 128 ausstehende Challenges;
 Historie wächst unbeschränkt und Prüfungen durchsuchen sie linear. Es gibt
-noch keine dauerhafte Ressourcen-, Rate-Limit- oder DoS-Strategie und keine
-Bereinigung ausstehender Anfragen. Der Host und der externe Prüfer gehören
+noch keine dauerhafte Ressourcen-, Rate-Limit- oder DoS-Strategie. Bei einer
+erfolgreichen neuen Challenge werden abgelaufene Anfragen verworfen; eine
+abgelehnte Operation verändert auch diesen Cache nicht. Der Host und der externe Prüfer gehören
 zum vertrauenswürdigen Prozess. Python-Frozen-Modelle schützen nicht gegen
 Codeausführung oder direkten Eingriff in private Attribute. Auch native
 Schlüsselobjekte garantieren keine sichere Löschung aller Heap-Kopien.
@@ -282,3 +290,8 @@ Technische Primärquellen: [Ed25519-API von cryptography](https://cryptography.i
 [PyNaCl-Changelog](https://github.com/pyca/pynacl/blob/main/CHANGELOG.rst),
 [Pydantic Strict Mode](https://pydantic.dev/docs/validation/latest/concepts/strict_mode/),
 [Python-JSON-API](https://docs.python.org/3/library/json.html).
+
+Das [adversariale Review vom 8. Oktober 2026](../security/identity-security-review-2026-10-08.md)
+dokumentiert Reproduktionen, Behebungen, Abweichungen und verbleibende Risiken.
+Die minimale CI steht in `.github/workflows/identity-security.yml`; bestandene
+Tests oder CI sind kein vollständiger Sicherheitsnachweis.

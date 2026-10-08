@@ -133,54 +133,57 @@ beschreibt die Aktualisierung des gebündelten libsodium in 1.6.2; dessen
 [Punktvalidierungs-API](https://doc.libsodium.org/advanced/point-arithmetic)
 begründet die zusätzliche Eingangsprüfung.
 
-### Tatsächlich ausgeführte Prüfläufe
+### Aktualisierte tatsächliche Prüfläufe: adversariales Review am 2026-10-08
 
-Umgebung: CPython 3.13.15, `uv` 0.12.5. Der Standardcache ist schreibgeschützt;
-für alle uv-Aufrufe wurde `UV_CACHE_DIR=/tmp/krypta-identity-uv-cache` gesetzt.
-Vorhandene öffentliche Bibliothekspakete wurden aus dem bestehenden lokalen
-uv-Cache kopiert. Das verändert keine Projekt-Sicherheitsdokumente und
-umgeht keine Netzwerkfreigabe. Hypothesis und PyNaCl waren nicht vorhanden.
+Diese Ergebnisse ersetzen die früheren Blockade-/69-Test-Angaben. Grundlage ist
+GitHub PR #1, Head `7951cf44a2c278b39e695018fea429e785e21416`, zuzüglich der im
+[Security Review](identity-security-review-2026-10-08.md) dokumentierten Korrekturen.
+CPython 3.13.15, uv 0.12.5, `UV_CACHE_DIR=/tmp/krypta-identity-uv-cache`.
+Der inzwischen vollständige vorhandene Benutzer-Cache wurde in den beschreibbaren
+Cache kopiert. Tests laufen in einer frisch angelegten Review-venv mit dem
+Review-Quellpfad. Wegen blockiertem PyPI-DNS wird lokal `UV_OFFLINE=true` gesetzt.
+Browser-/GitHub-Abfragen für aktuelle Advisories waren hingegen möglich.
 
 | Prüfung | Tatsächliches Ergebnis |
 |---|---|
-| `uv sync` mit Netzwerk | Fehlgeschlagen: PyPI-DNS/Netzwerkzugriff gesperrt |
-| Freigabe des Abhängigkeitsdownloads | Automatisch abgewiesen: Sandbox-Eskalationen deaktiviert |
-| `uv sync` nach Härtung, `UV_OFFLINE=1` | Fehlgeschlagen: PyNaCl nicht im Cache; auch Hypothesis fehlt |
-| `uv run pytest`, `UV_OFFLINE=1` | Resolver blockiert vor Teststart; kein finaler Gesamttest |
-| `uv run ruff check .`, `UV_OFFLINE=1` | Resolver blockiert vor Ruff-Start |
-| `uv run mypy src`, `UV_OFFLINE=1` | Resolver blockiert vor mypy-Start |
-| Ruff über bereits installierte Cache-Version: `uv run --no-sync ruff check .` | Finaler Quellstand: erfolgreich, keine Befunde |
-| Strenge mypy-Prüfung über lokalen Cache | Vor PyNaCl: erfolgreich für 13 Quelldateien; danach genau ein fehlender Import `nacl.bindings` wegen fehlender Abhängigkeit |
-| Unit-/Szenarientests über lokale Cache-Pakete vor zusätzlicher Härtung | 69 bestanden in 0,42 s; Pydantic 2.13.5, cryptography 50.0.2, pytest 9.1.1 |
-| Neue Punktvalidierungs- und Wiedereintrittsregressionen | Implementiert, noch nicht im finalen Gesamtlauf ausführbar |
-| Hypothesis-Property-/Lifecycle-Tests | Implementiert, wegen fehlendem Hypothesis noch nicht ausgeführt |
+| Ausgangsstand: `uv run pytest -q` | 76 bestanden |
+| Drei neue Fehlerreproduktionen vor Korrektur | Alle drei fehlgeschlagen: Fristlücke, Uhr-Reentrancy, volle abgelaufene Challenge-Liste |
+| `uv sync --locked` | Erfolgreich aus vollständigem Cache, einschließlich lokalem PEP-517-Build |
+| `uv run pytest -v` | 94 bestanden; keine übersprungenen Tests |
+| `uv run ruff check .` | Erfolgreich, keine Befunde |
+| `uv run mypy src` | Erfolgreich, 13 Quelldateien |
+| `uv lock --check` | Erfolgreich; 23 aufgelöste Packages einschließlich Projekt |
+| `git diff --check` | Erfolgreich |
+| Ungecachter Netzwerk-`uv sync --locked` | PyPI-DNS blockiert; keine erfolgreiche Online-Installation behauptet |
 
-**Kein vollständiger grüner Prüflauf und keine erzeugte `uv.lock`.** Resultate
-des früheren Zwischenstands gelten nicht automatisch für die danach gehärtete
-Implementierung. Der abschließende Nachweis ist eine offene Aufgabe, kein
-bestandenes Freigabekriterium. Es werden weder Importfehler ignoriert noch
-Hypothesis-Tests übersprungen oder eine lokale Nachbildung der Kryptobibliothek
-als Ersatz eingebunden.
+Hypothesis läuft mit `derandomize=True`, ohne lokale Beispieldatenbank;
+sechs Property-/Stateful-Tests sind enthalten. Ablehnungen prüfen jetzt die
+Identität des **gesamten Snapshots**, einschließlich ausstehender Challenges.
+Zusätzliche Tests betreffen Commit-Deadline, Allokationsfehler, rekursive
+Uhr-/Prüferaufrufe, falsche Adapterantworttypen, alle Signaturdomänenpaare,
+Ed25519-Skalarmalleability und native Punktvalidierungsvektoren.
+Bekannte Grenzen bei konkurrierenden externen Heads und kompromittierten
+Managern sind als ausführbare Grenzen dokumentiert, nicht als behoben erklärt.
 
-Für den Abschluss müssen in einer Umgebung mit PyPI-Zugriff `uv sync` und
-anschließend die drei verlangten `uv run`-Prüfungen ausgeführt werden.
-Der Download wurde beim Nutzer angefragt; bis zu dessen Ergebnis bleibt
-dieser Teil blockiert. Abhängigkeiten sind in `pyproject.toml` beschrieben,
-aber mangels erfolgreicher Auflösung noch nicht vollständig gepinnt.
+`uv.lock` wird erstmals im Review-Branch versioniert. Native Kryptografie darf
+bei uv-Installation nur aus Wheels kommen; Build-Backend und seine Abhängigkeiten
+sind zusätzlich gepinnt. Das ist keine vollständige Herkunftsattestierung.
 
-### Lokaler Git-/PR-Stand
+### Git-/PR-Stand und CI
 
-Der Workspace enthielt ein leeres, geschütztes `.git`-Verzeichnis und keinen
-Git-Checkout. Der Feature-Branch `feat/identity-state-machine` entstand daher
-im beschreibbaren separaten Checkout `/tmp/krypta-identity-state-machine`.
-Sein Basiscommit enthält ausschließlich den vorhandenen Dokumentationsstand.
-Implementierung, Tests und neue Dokumentation werden in den Workspace gespiegelt;
-das geschützte `.git` bleibt unverändert. Ein Git-Bundle im Workspace sichert
-den Branch einschließlich Basiscommit dauerhaft zur späteren lokalen Übernahme.
+Das Repository existiert inzwischen: `p3t3r67x0/kryptachat`, PR #1 als Draft
+gegen `main`. Dieses Review arbeitet auf
+`security/identity-state-machine-review` im beschreibbaren Checkout
+`/tmp/krypta-identity-review`, mit neuem Draft-PR gegen
+`feat/identity-state-machine`. Änderungen werden in den Workspace gespiegelt;
+sein geschütztes `.git` wird nicht verändert. Kein automatischer Merge.
 
-Laut Nutzer existiert kein GitHub-Repository. Deshalb gibt es keinen Remote,
-keinen Push und keinen angelegten Draft-PR. Die vollständige
-[PR-Beschreibung](../docs/identity-state-machine-pr.md) ist lokal vorbereitet.
+`.github/workflows/identity-security.yml` führt alle fünf Prüfungen aus,
+mit überprüften vollständigen Action-SHAs, `contents: read`, ohne gespeicherte
+Checkout-Credentials, Secrets, Cache oder privilegierte Events. Der Remote-Lauf
+ist vor Veröffentlichung nicht ausgeführt; sein tatsächlicher Status wird am
+Draft-PR und im Abschlussbericht gemeldet. Lokale Ergebnisse sind keine
+behaupteten GitHub-CI-Ergebnisse.
 
 ## Offene Sicherheitsrisiken und nächste Prüfungen
 
@@ -196,7 +199,8 @@ keinen Push und keinen angelegten Draft-PR. Die vollständige
 - Messaging-Protokollbindung, Post-Compromise-Schutz, Empfängerausschluss,
   Kontaktverifikation, Gruppen-Epochen und plattformnative Keystores fehlen.
 - Ressourcen- und DoS-Strategie fehlt: 64 Geräte inklusive Tombstones,
-  128 offene Challenges, unbeschränkt wachsende In-Memory-Historie.
+  128 offene Challenges (abgelaufene werden bei neuer Anfrage bereinigt),
+  unbeschränkt wachsende In-Memory-Historie.
 - Abhängigkeitspinning und lokale Tests sind keine Supply-Chain-Prüfung,
   keine reproduzierbaren signierten Releases und kein unabhängiges Audit.
 
