@@ -23,19 +23,21 @@ App-Konzept und wird für diesen Prototyp nicht verwendet.
 ## Prototyp entwickeln
 
 ```bash
-uv sync
-uv run pytest
+uv sync --locked
+uv run pytest -v
 uv run ruff check .
 uv run mypy src
+uv lock --check
 ```
 
 Architektur und Nutzung: [Identity State Machine](docs/identity-state-machine.md).
 Annahmen, Abweichungen, Risiken und Prüfergebnisse:
 [Implementierungsreview](security/identity-implementation-review.md).
 Der Prototyp ist keine Schutzlösung für gefährdete Menschen und wurde nicht
-unabhängig sicherheitsgeprüft. Der abschließende Gesamttest und `uv.lock` fehlen
-noch, da PyNaCl und Hypothesis im lokalen Cache fehlen und der Download in
-der Ausführungsumgebung blockiert ist. Einzelheiten stehen im Review.
+unabhängig sicherheitsgeprüft. `uv.lock` und eine minimale CI sind vorhanden; im internen adversarialen
+[Review](security/identity-security-review-2026-10-08.md) bestehen 94 Tests,
+Ruff, mypy und die Lock-Prüfung. Das ist kein vollständiger Sicherheitsnachweis.
+Globale Aktualität, sichere Geräte-Kopplung und Messaging-Integration fehlen.
 
 ## Sicherheitsdokumentation
 

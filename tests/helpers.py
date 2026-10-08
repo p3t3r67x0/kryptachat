@@ -142,10 +142,12 @@ class Scenario:
 
 def reject(machine, transition, error=IdentityError, **kwargs):
     state, history = machine.state, machine.history
+    snapshot = machine._snapshot
     with pytest.raises(error):
         machine.apply(transition, **kwargs)
     assert machine.state is state
     assert machine.history is history
+    assert machine._snapshot is snapshot  # Includes pending challenges, not just device history.
 
 
 def resign(transition: SignedTransition, signer: SigningKey, possession=None, **changes):

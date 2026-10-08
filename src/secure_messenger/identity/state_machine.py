@@ -4,7 +4,8 @@ import math
 import secrets
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 from .authority import authorize
@@ -79,11 +80,19 @@ class IdentityStateMachine:
         self._monotonic = monotonic_clock
         self._lock = threading.RLock()
         self._snapshot: _Snapshot | None = None
-        self._verifying = False
+        self._operating = False
 
-    def _require_no_reentrant_mutation(self) -> None:
-        if self._verifying:
-            raise VersionConflict("external verifier must not reenter mutating operations")
+    @contextmanager
+    def _operation(self) -> Iterator[None]:
+        """Serialize operations and prevent callbacks from recursively changing this identity."""
+        with self._lock:
+            if self._operating:
+                raise VersionConflict("callbacks must not reenter state machine operations")
+            self._operating = True
+            try:
+                yield
+            finally:
+                self._operating = False
 
     def _initialized(self) -> _Snapshot:
         if self._snapshot is None:
@@ -102,8 +111,7 @@ class IdentityStateMachine:
 
     def initialize(self) -> BootstrapKeys:
         """Always generates a NEW root. No root import, restore, recovery or genesis replay API."""
-        with self._lock:
-            self._require_no_reentrant_mutation()
+        with self._operation():
             if self._snapshot is not None:
                 raise AlreadyInitialized("identity is already initialized")
             root = SigningKey.generate()
@@ -131,8 +139,9 @@ class IdentityStateMachine:
                 devices=(first.device,),
                 status=IdentityStatus.ACTIVE,
             )
+            keys = BootstrapKeys(root, first)
             self._snapshot = _Snapshot(History(signed, (state,)))
-            return BootstrapKeys(root, first)
+            return keys
 
     def _validity(self, transition: SignedTransition) -> None:
         now = self._wall_clock()
@@ -181,23 +190,29 @@ class IdentityStateMachine:
 
     def validate_transition(self, transition: SignedTransition | bytes) -> IdentityState:
         """Local signature/authority/consistency checks only. Does NOT establish freshness."""
-        with self._lock:
+        with self._operation():
             return self._validate(transition, self._initialized())[1]
 
     def check_known_state(self, state: IdentityState) -> None:
-        with self._lock:
+        with self._operation():
             check_known_state(self._initialized().history, checked(state))
 
     def begin_freshness_check(self, transition: SignedTransition | bytes) -> FreshnessChallenge:
         """Bind a nonce to the exact prospective successor; no network IO takes place."""
-        with self._lock:
-            self._require_no_reentrant_mutation()
+        with self._operation():
             snapshot = self._initialized()
             parsed, candidate = self._validate(transition, snapshot)
             started_at = self._monotonic()
             if not math.isfinite(started_at):
                 raise FreshnessError("invalid local monotonic clock")
-            if len(snapshot.pending) >= 128:
+            live_pending = []
+            for request in snapshot.pending:
+                elapsed = started_at - request.started_at
+                if not math.isfinite(elapsed) or elapsed < 0:
+                    raise FreshnessError("invalid local monotonic clock")
+                if elapsed < self._policy.challenge_max_age_seconds:
+                    live_pending.append(request)
+            if len(live_pending) >= 128:
                 raise FreshnessError("too many outstanding freshness requests")
             challenge = FreshnessChallenge(
                 identity_id=candidate.identity_id,
@@ -211,7 +226,7 @@ class IdentityStateMachine:
                 state_hash(snapshot.history.current),
                 started_at,
             )
-            self._snapshot = _Snapshot(snapshot.history, (*snapshot.pending, pending))
+            self._snapshot = _Snapshot(snapshot.history, (*live_pending, pending))
             return challenge
 
     def apply(
@@ -221,8 +236,7 @@ class IdentityStateMachine:
         challenge: FreshnessChallenge | None = None,
         evidence: bytes | None = None,
     ) -> IdentityState:
-        with self._lock:
-            self._require_no_reentrant_mutation()
+        with self._operation():
             snapshot = self._initialized()
             parsed, candidate = self._validate(transition, snapshot)
             if challenge is None:
@@ -235,14 +249,15 @@ class IdentityStateMachine:
                 or pending.challenge.state_hash != state_hash(candidate)
             ):
                 raise FreshnessError("challenge does not match this transition and current parent")
-            self._verifying = True
-            try:
-                verify_freshness(pending, evidence, self._verifier, self._policy, self._monotonic)
-            finally:
-                self._verifying = False
+            deadline = verify_freshness(
+                pending, evidence, self._verifier, self._policy, self._monotonic
+            )
+            # Prepare allocations before the last expiry checks; exceptions never commit.
+            updated = _Snapshot(snapshot.history.appended(candidate, parsed))
+            self._validity(parsed)
+            deadline.require_live(self._monotonic())
             if self._snapshot is not snapshot:
                 raise VersionConflict("state changed during external verification")
-            self._validity(parsed)
             # Single commit point: history and pending requests change together, after ALL checks.
-            self._snapshot = _Snapshot(snapshot.history.appended(candidate, parsed))
+            self._snapshot = updated
             return candidate

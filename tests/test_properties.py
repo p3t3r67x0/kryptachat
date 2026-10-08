@@ -159,3 +159,48 @@ class Lifecycle(RuleBasedStateMachine):
 
 TestLifecycle = Lifecycle.TestCase
 TestLifecycle.settings = settings(max_examples=40, stateful_step_count=25, deadline=None)
+
+
+@given(lifetime=st.integers(min_value=1, max_value=300), overrun=st.integers(0, 100))
+@settings(max_examples=40, deadline=None)
+def test_expiry_at_commit_boundary_preserves_the_entire_snapshot(lifetime, overrun):
+    from secure_messenger.identity import FreshnessPolicy
+    from secure_messenger.identity.errors import ExpiredFreshness
+
+    s = Scenario(
+        policy=FreshnessPolicy(challenge_max_age_seconds=300, confirmation_max_age_seconds=300)
+    )
+    s.witness.lifetime = lifetime
+    t, _ = s.addition()
+    challenge, evidence = s.proof(t)
+    reads = 0
+
+    def advancing_wall_clock():
+        nonlocal reads
+        reads += 1
+        if reads == 2:
+            s.clock.monotonic += lifetime + overrun
+        return s.clock.wall
+
+    s.machine._wall_clock = advancing_wall_clock
+    reject(s.machine, t, ExpiredFreshness, challenge=challenge, evidence=evidence)
+
+
+@given(data=st.data(), replacement=st.integers(min_value=0, max_value=255))
+@settings(max_examples=60, deadline=None)
+def test_near_valid_wire_corruption_never_partially_commits(data, replacement):
+    from secure_messenger.identity.errors import IdentityError
+
+    s = Scenario()
+    t, _ = s.addition()
+    from secure_messenger.identity.codec import canonical
+
+    original = canonical(t)
+    challenge, evidence = s.proof(t)
+    raw = bytearray(original)
+    position = data.draw(st.integers(min_value=0, max_value=len(raw) - 1))
+    raw[position] = replacement
+    if bytes(raw) == original:
+        assert s.machine.apply(bytes(raw), challenge=challenge, evidence=evidence).generation == 1
+    else:
+        reject(s.machine, bytes(raw), IdentityError, challenge=challenge, evidence=evidence)
