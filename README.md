@@ -8,14 +8,34 @@ Bedrohungsmodell und werden vor der Umsetzung nachvollziehbar geprüft.
 
 ## Projektstand
 
-Stand: 8. Oktober 2026. Das Projekt befindet sich in der Konzeptphase.
-Die Verzeichnisse `app/` und `core/` sind leer. Es gibt noch keinen lauffähigen
-Messenger und keinen Sicherheitsnachweis.
+Stand: 8. Oktober 2026. Neben den Architekturentwürfen gibt es einen ersten
+isolierten Python-Identitätsprototyp unter `src/secure_messenger/identity/`.
+Die Verzeichnisse `app/` und `core/` sind weiterhin leer. Es gibt keinen
+lauffähigen Messenger und keinen unabhängigen Sicherheitsnachweis.
 
-Festgelegt sind Python-Anwendungslogik und Server mit geprüften nativen
-Kryptobibliotheken. Konkrete Plattformen, Bibliotheken und Protokoll-Stack
-werden vor Implementierung geprüft und festgelegt. Die bisherige
-`requirements.txt` ist keine freigegebene Abhängigkeitsauswahl.
+Der Prototyp verwendet Python 3.13+, Pydantic v2 und native Ed25519-Primitiven
+über `cryptography`. Zustandsübernahmen nach Genesis bleiben standardmäßig
+gesperrt, bis ein expliziter externer Aktualitätsprüfer eingebunden ist.
+Es gibt keinen produktiven Prüfer, keine Nachrichten, keine Netzwerkfunktion
+und keine Recovery. Die bisherige `requirements.txt` gehört zum alten
+App-Konzept und wird für diesen Prototyp nicht verwendet.
+
+## Prototyp entwickeln
+
+```bash
+uv sync
+uv run pytest
+uv run ruff check .
+uv run mypy src
+```
+
+Architektur und Nutzung: [Identity State Machine](docs/identity-state-machine.md).
+Annahmen, Abweichungen, Risiken und Prüfergebnisse:
+[Implementierungsreview](security/identity-implementation-review.md).
+Der Prototyp ist keine Schutzlösung für gefährdete Menschen und wurde nicht
+unabhängig sicherheitsgeprüft. Der abschließende Gesamttest und `uv.lock` fehlen
+noch, da PyNaCl und Hypothesis im lokalen Cache fehlen und der Download in
+der Ausführungsumgebung blockiert ist. Einzelheiten stehen im Review.
 
 ## Sicherheitsdokumentation
 

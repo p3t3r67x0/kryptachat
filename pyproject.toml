@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "krypta-identity-prototype"
+version = "0.1.0"
+description = "Isolated, non-production identity state machine for Krypta"
+requires-python = ">=3.13"
+dependencies = ["pydantic>=2.12,<3", "cryptography>=50,<51", "pynacl>=1.6.2,<2"]
+
+[dependency-groups]
+dev = ["pytest>=8.4,<10", "hypothesis>=6.140,<7", "ruff>=0.14,<1", "mypy>=1.18,<2"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/secure_messenger"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+extend-exclude = ["venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
