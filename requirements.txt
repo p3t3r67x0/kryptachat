@@ -1,0 +1,8 @@
+kivy==2.2.1
+kivymd==1.2.0
+aiortc==1.6.0
+kademlia==0.2.4
+cryptography==43.0.1
+signal-protocol-py==0.2.1
+ipfshttpclient==0.8.0a2
+pyjnius==1.6.2
